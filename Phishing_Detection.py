@@ -11,7 +11,6 @@ import collections as ct
 
 import nltk
 from nltk.tokenize import RegexpTokenizer
-from nltk.corpus import words
 from nltk.corpus import wordnet
 
 from sklearn.model_selection import train_test_split
@@ -19,6 +18,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from collections import Counter
 
+from sklearn.metrics import ConfusionMatrixDisplay
+from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import KFold
+from tqdm.auto import tqdm
 # initial loading, go to line 323 for modeling start.
 
 df = pd.read_csv('phishing_site_urls.csv')
@@ -139,7 +143,7 @@ df['text_tokenized'] = df.URL.map(lambda t: tokenizer.tokenize(t))
 
 df['text_token_conc'] = df['text_tokenized'].map(lambda l: ' '.join(l))
 
-# Jonathan's Features
+## Jonathan's Features
 """
 - (below) my first feature will be a count of the special characters in each URL.
 """
@@ -204,22 +208,13 @@ df['case_change_count'] = df.URL.map(lambda string: count_case_changes(string))
 """
 # - (below) save my data frame for later use so we don't need to run the english word check again!
 """
-# In[48]:
-
 
 df.head()
-
-
-# In[12]:
-
 
 df.to_pickle('phishing_df.pkl')
 
 
-# ## Bryan Features 
-
-# In[15]:
-
+## Bryan Features
 
 zip_filename = "phishing_df.zip"
 pkl_filename = "phishing_df.pkl"
@@ -230,8 +225,6 @@ with zipfile.ZipFile(zip_filename) as z:
         df = pd.read_pickle(f)
 
 
-# In[4]:
-
 """
 - (below) Feature that determines whether www. is found in the string 
 - (below) add a column that is a 1 if the url contains www and 0 otherwise 
@@ -240,15 +233,10 @@ with zipfile.ZipFile(zip_filename) as z:
 contains_www = df.assign(contains_www = df['URL'].apply(lambda x: 1 if 'www.' in x else 0))
 
 
-# In[5]:
-
 """
 - (below) Do the same but checks to see if the url starts with www. 
 """
 startswith_www = df.assign(startswith_www = df['URL'].apply(lambda x: 1 if x.startswith('www.') else 0))
-
-
-# In[6]:
 
 """
 - (below) Returns the number of characters after www
@@ -404,7 +392,7 @@ del df_test['phishing']
 # Logistic Regression
 
 """
-# - (below) initial training of logistic regression model
+- (below) initial training of logistic regression model
 """
 
 df_train.head()
@@ -439,7 +427,6 @@ coefs = dict(zip(df_train.columns, model.coef_[0].round(3)))
 coefs
 
 # Predicting the validation set.
-
 """
 - (below) hard predictions (0, 1)
 """
@@ -457,6 +444,8 @@ model.predict_proba(X_val)
 y_val_pred = model.predict_proba(X_val)[:, 1]
 y_val_pred
 
+# Model Evaluation
+## Sub-Optimal Model Evaluation
 """
 - (below) our first decision rule will be a probability of 0.5
 """
@@ -468,31 +457,7 @@ phishing_decision
 - (below) our first accuracy measure
 """
 
-(y_val == phishing_decision).mean()
-
-# tune the decision threshold
-
-thresholds = np.linspace(0, 1, 21)
-
-scores = []
-
-for t in thresholds:
-    score = accuracy_score(y_val, y_val_pred >= t)
-    print('%.2f %.3f' % (t, score))
-    scores.append(score)
-
-plt.plot(thresholds, scores)
-
-plt.xlabel("probability threshold for decision")
-
-plt.ylabel("percent accuracy")
-
-"""
-- (above) looks like 0.45 is a better decision rule.
-"""
-
-phishing_decision = (y_val_pred >= 0.45)
-phishing_decision
+accuracy_score(y_val, y_val_pred >= 0.45)
 
 """
 - (below) let's make a prediction table
@@ -505,10 +470,6 @@ df_pred['actual'] = y_val
 df_pred['correct'] = df_pred.prediction == df_pred.actual
 df_pred
 
-df_pred.correct.mean()
-
-accuracy_score(y_val, y_val_pred >= 0.45)
-
 """
 - (below) just double-checking that the model was able to predict some phishing sites...
 """
@@ -519,17 +480,17 @@ df_pred[(df_pred['correct'] == True) & (df_pred['prediction'] == 1)]
 - (below) there shouldn't be in any predictions with a 1.0 probability.
 """
 
-len(y_val_pred)
-
 Counter(y_val_pred >= 1.0)
 
+## Better Model Evaluation Practices
 """
 - (below) we need to be aware of class balance.
 """
 
-print('non-phishing sites: {}' .format(np.bincount(y_val)[0]))
-print('phishing sites: {}' .format(np.bincount(y_val)[1]))
-print('there are {:.2f} times as many non-phishing sites as phishing sites'.format(np.bincount(y_val)[0] / np.bincount(y_val)[1]))
+print('non-phishing sites: {}'.format(np.bincount(y_val)[0]))
+print('phishing sites: {}'.format(np.bincount(y_val)[1]))
+print('there are {:.2f} times as many non-phishing sites as phishing sites'.format(
+    np.bincount(y_val)[0] / np.bincount(y_val)[1]))
 
 """
 - (below) accuracy predicting phishing sites...
@@ -540,9 +501,219 @@ df_pred[df_pred['actual'] == 1].correct.mean()
 """
 - (below) accuracy predicting good sites...
 """
+
 df_pred[df_pred['actual'] == 0].correct.mean()
 
+### Confusion Matrix
+"""
+- (below) false negatives are sites we think are safe not but are actually phishing.
+- (below) false positives are sites we think are phishing but are actually safe.
+"""
 
+t = 0.50
 
+ConfusionMatrixDisplay.from_predictions(y_val, y_val_pred >= t)
+plt.show()
 
+"""
+- (below) we can recover the accuracy by adding the true negative and true positive normalized values.
+"""
 
+ConfusionMatrixDisplay.from_predictions(y_val, y_val_pred >= t, normalize='all')
+plt.show()
+
+### ROC curve
+
+fpr, tpr, thresholds = roc_curve(y_val, y_val_pred)
+
+plt.figure(figsize=(5, 5))
+
+plt.plot(fpr, tpr, label='Model')
+plt.plot([0, 1], [0, 1], label='Random', linestyle='--')
+
+plt.xlabel('FPR')
+plt.ylabel('TPR')
+
+plt.legend()
+
+"""
+- (above) point 0,0: no false positives because we're assigning everything to class 0.
+- (above) point 0,0: No false negatives because we are getting all the true negative values by assigning EVERYTHING to class 0
+- (above) point 1,1: high true positive rate because we're getting all the true positive values by assigning everything to class 1.
+- (above) point 1,1: high false positive rate because we're making a lot of mistakes.
+- (above) a good model looks like a rounded 90 degree corner.
+- (above) a bad model will look similar to a diagonal curve.
+- (above) if the model curve is inverted and below the diagonal line, then something went wrong. you probably need to switch your 1 and 0's.
+"""
+
+roc_auc_score(y_val, y_val_pred)
+
+"""
+- (above) AUC under the random curve (diagonal line) is 0.5
+- (above) AUC under the ideal curve (90 degree corner) is 1
+- (above) in other words, AUC ranges from 0.5 to 1.0
+- (above) INTERPRETATION: image you have your predictions and you have ordered them by their soft prediction value (probability)
+   - now split this list into ordered subsets, one for those who churned and one for those who didn't.
+   - AUC is the probabililty that the score is higher for a randomly selected positive (phishing) observation than a randomly selected negative (non-phishing) observation.
+"""
+
+###  K-Fold Cross-Validation
+"""
+-  Evaluating the same model on different subsets of data
+-  Getting the average prediction and the spread within predictions
+- (below) `train` and `predict` functions.
+- (below) the C parameter is regularization strength and we will tune it later.
+"""
+
+def train(df_train, y_train, C=1.0):
+    X_train = df_train.values
+
+    model = LogisticRegression(C=C, max_iter=1000)
+    model.fit(X_train, y_train)
+
+    return model
+
+def predict(df_pred, model):
+    X = df_pred.values
+    y_pred = model.predict_proba(X)[:, 1]
+
+    return y_pred
+
+"""
+- (below) combine train and validation sets into a "full train" set.
+- (below) Split the validation set into "K" different sets.
+- (below) rule of thumb: K = 2-3 for large datasets, 5-10 for smaller datasets.
+- (below) Use K-1 sets to train a model to predict the last set.
+- (below) Do this K times. For K = 3, train set 1 and 2 to predict 3, train set 2 and 3 to predict 1, train set 1 and 3 to predict 2.
+- (below) at each step, calculate ROC AUC
+- (below) at the end, summarize these K values with a mean score and st.dev
+"""
+
+df_full_train = pd.concat([df_train, df_val])
+df_full_train.shape
+
+y_full_train = np.concatenate((y_train, y_val))
+y_full_train.shape
+
+"""
+- (below) kfold.split() creates a generator that be iterated through by using the next() function.
+"""
+
+n_splits = 5
+
+kfold = KFold(n_splits=n_splits, shuffle=True, random_state=1)
+
+scores = []
+
+for train_idx, val_idx in kfold.split(df_full_train):
+    df_train = df_full_train.iloc[train_idx]
+    df_val = df_full_train.iloc[val_idx]
+
+    y_train = y_full_train[train_idx]
+    y_val = y_full_train[val_idx]
+
+    model = train(df_train, y_train)
+    y_pred = predict(df_val, model)
+
+    auc = roc_auc_score(y_val, y_pred)
+    scores.append(auc)
+
+    print('%.3f +- %.3f' % (np.mean(scores), np.std(scores)))
+
+## Tune the Model
+"""
+- (below) tqdm displays how long a for loop will take to complete.
+"""
+### tune the decision threshold
+
+thresholds = np.linspace(0, 1, 101)
+
+n_splits = 5
+
+kfold = KFold(n_splits=n_splits, shuffle=True, random_state=1)
+
+scores_sum = np.zeros((len(thresholds), 8))
+
+for train_idx, val_idx in tqdm(kfold.split(df_full_train), total=n_splits, desc="KFold iterations"):
+    df_train = df_full_train.iloc[train_idx]
+    df_val = df_full_train.iloc[val_idx]
+
+    y_train = y_full_train[train_idx]
+    y_val = y_full_train[val_idx]
+
+    model = train(df_train, y_train)
+    y_pred = predict(df_val, model)
+
+    actual_positive = (y_val == 1)
+    actual_negative = (y_val == 0)
+
+    for i, t in enumerate(thresholds):
+        predict_positive = (y_pred >= t)
+        predict_negative = (y_pred < t)
+
+        tp = (predict_positive & actual_positive).sum()
+        tn = (predict_negative & actual_negative).sum()
+
+        fp = (predict_positive & actual_negative).sum()
+        fn = (predict_negative & actual_positive).sum()
+
+        accuracy = (tp + tn) / (tp + tn + fp + fn)
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+
+        scores_sum[i] += np.array([t, tp, fp, fn, tn, accuracy, precision, recall])
+
+final_scores = scores_sum / n_splits
+
+columns = ['threshold', 'tp', 'fp', 'fn', 'tn', 'accuracy', 'precision', 'recall/tpr']
+
+final_scores_df = pd.DataFrame(final_scores, columns=columns)
+
+final_scores_df['fpr'] = final_scores_df.fp / (final_scores_df.fp + final_scores_df.tn)
+
+plt.plot(thresholds, final_scores_df['accuracy'].values)
+
+plt.xlabel("probability threshold for decision")
+
+plt.ylabel("percent accuracy")
+
+"""
+- (above & below) looks like 0.44 is a better decision rule.
+"""
+
+final_scores_df.query('0.40 <= threshold <= 0.60')
+
+phishing_decision = (y_val_pred >= 0.44)
+phishing_decision
+
+accuracy_score(y_val, y_val_pred >= 0.44)
+
+### tune the regularization parameter
+"""
+- (below) A high value of C tells the model to give high weight to the training data, and a lower weight to the complexity penalty. "Trust this training data a lot"
+- (below) A low value tells the model to give more weight to this complexity penalty at the expense of fitting to the training data. "This data may not be fully representative of the real world data, so if it's telling you to make a parameter really large, don't listen to it".
+"""
+
+n_splits = 5
+
+reg_vals = [0.001, 0.01, 0.1, 0.5, 1, 5, 10]
+
+for C in tqdm(reg_vals, total=len(reg_vals), desc="Regularization iterations"):
+    kfold = KFold(n_splits=n_splits, shuffle=True, random_state=1)
+
+    scores = []
+
+    for train_idx, val_idx in kfold.split(df_full_train):
+        df_train = df_full_train.iloc[train_idx]
+        df_val = df_full_train.iloc[val_idx]
+
+        y_train = y_full_train[train_idx]
+        y_val = y_full_train[val_idx]
+
+        model = train(df_train, y_train, C=C)
+        y_pred = predict(df_val, model)
+
+        auc = roc_auc_score(y_val, y_pred)
+        scores.append(auc)
+
+    print('C=%s %.3f +- %.3f' % (C, np.mean(scores), np.std(scores)))
