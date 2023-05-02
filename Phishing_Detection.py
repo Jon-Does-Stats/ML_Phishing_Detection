@@ -606,16 +606,16 @@ kfold = KFold(n_splits=n_splits, shuffle=True, random_state=1)
 scores = []
 
 for train_idx, val_idx in kfold.split(df_full_train):
-    df_train = df_full_train.iloc[train_idx]
-    df_val = df_full_train.iloc[val_idx]
+    df_train_fold = df_full_train.iloc[train_idx]
+    df_val_fold = df_full_train.iloc[val_idx]
 
-    y_train = y_full_train[train_idx]
-    y_val = y_full_train[val_idx]
+    y_train_fold = y_full_train[train_idx]
+    y_val_fold = y_full_train[val_idx]
 
-    model = train(df_train, y_train)
-    y_pred = predict(df_val, model)
+    model_fold = train(df_train_fold, y_train_fold)
+    y_pred_fold = predict(df_val_fold, model_fold)
 
-    auc = roc_auc_score(y_val, y_pred)
+    auc = roc_auc_score(y_val_fold, y_pred_fold)
     scores.append(auc)
 
     print('%.3f +- %.3f' % (np.mean(scores), np.std(scores)))
@@ -634,22 +634,23 @@ kfold = KFold(n_splits=n_splits, shuffle=True, random_state=1)
 
 scores_sum = np.zeros((len(thresholds), 8))
 
-for train_idx, val_idx in tqdm(kfold.split(df_full_train), total=n_splits, desc="KFold iterations"):
-    df_train = df_full_train.iloc[train_idx]
-    df_val = df_full_train.iloc[val_idx]
+for train_idx, val_idx in tqdm(kfold.split(df_full_train), total = n_splits, desc = "KFold iterations"):
+    df_train_fold = df_full_train.iloc[train_idx]
+    df_val_fold = df_full_train.iloc[val_idx]
 
-    y_train = y_full_train[train_idx]
-    y_val = y_full_train[val_idx]
+    y_train_fold = y_full_train[train_idx]
+    y_val_fold = y_full_train[val_idx]
 
-    model = train(df_train, y_train)
-    y_pred = predict(df_val, model)
+    model_fold = train(df_train_fold, y_train_fold)
+    y_pred_fold = predict(df_val_fold, model_fold)
 
-    actual_positive = (y_val == 1)
-    actual_negative = (y_val == 0)
+    actual_positive = (y_val_fold == 1)
+    actual_negative = (y_val_fold == 0)
 
     for i, t in enumerate(thresholds):
-        predict_positive = (y_pred >= t)
-        predict_negative = (y_pred < t)
+
+        predict_positive = (y_pred_fold >= t)
+        predict_negative = (y_pred_fold < t)
 
         tp = (predict_positive & actual_positive).sum()
         tn = (predict_negative & actual_negative).sum()
@@ -661,6 +662,7 @@ for train_idx, val_idx in tqdm(kfold.split(df_full_train), total=n_splits, desc=
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0
 
+        # Add the scores to the sum array
         scores_sum[i] += np.array([t, tp, fp, fn, tn, accuracy, precision, recall])
 
 final_scores = scores_sum / n_splits
@@ -707,13 +709,13 @@ for C in tqdm(reg_vals, total=len(reg_vals), desc="Regularization iterations"):
         df_train = df_full_train.iloc[train_idx]
         df_val = df_full_train.iloc[val_idx]
 
-        y_train = y_full_train[train_idx]
-        y_val = y_full_train[val_idx]
+        y_train_fold = y_full_train[train_idx]
+        y_val_fold = y_full_train[val_idx]
 
-        model = train(df_train, y_train, C=C)
-        y_pred = predict(df_val, model)
+        model_fold = train(df_train_fold, y_train_fold, C=C)
+        y_pred_fold = predict(df_val_fold, model_fold)
 
-        auc = roc_auc_score(y_val, y_pred)
+        auc = roc_auc_score(y_val_fold, y_pred_fold)
         scores.append(auc)
 
     print('C=%s %.3f +- %.3f' % (C, np.mean(scores), np.std(scores)))
